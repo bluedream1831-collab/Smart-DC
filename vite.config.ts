@@ -1,23 +1,23 @@
-import path from 'path';
+
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, '.', '');
-    return {
-      server: {
-        port: 3000,
-        host: '0.0.0.0',
-      },
-      plugins: [react()],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
-      resolve: {
-        alias: {
-          '@': path.resolve(__dirname, '.'),
-        }
-      }
-    };
+  // 載入環境變數 (Vercel 會在建置時自動提供 API_KEY)
+  const env = loadEnv(mode, process.cwd(), '');
+  
+  return {
+    plugins: [react()],
+    define: {
+      // 確保前端代碼可以透過 process.env.API_KEY 存取到金鑰
+      'process.env.API_KEY': JSON.stringify(env.API_KEY)
+    },
+    server: {
+      host: true
+    },
+    build: {
+      outDir: 'dist',
+      sourcemap: false
+    }
+  };
 });

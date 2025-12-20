@@ -3,7 +3,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { InspectionResult } from '../types';
 
 export const analyzeProductImage = async (base64Image: string): Promise<InspectionResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // 直接從定義的 process.env 取得金鑰
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("找不到 API 金鑰，請檢查環境變數設定。");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
   
   const prompt = `
     請分析此商品標籤圖像以進行倉庫驗收。
@@ -21,75 +27,81 @@ export const analyzeProductImage = async (base64Image: string): Promise<Inspecti
     請以 JSON 格式回傳，且字串內容請使用繁體中文。
   `;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: [
-      {
+  const data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: {
         parts: [
           { text: prompt },
-          { inlineData: { data: base64Image.split(',')[1], mimeType: 'image/jpeg' } }
+          { inlineData: { data, mimeType: 'image/jpeg' } }
         ]
-      }
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          productName: { type: Type.STRING },
-          hasPorkOrBeef: { type: Type.BOOLEAN },
-          meatOrigin: { type: Type.STRING },
-          allergens: {
-            type: Type.ARRAY,
-            items: {
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            productName: { type: Type.STRING },
+            hasPorkOrBeef: { type: Type.BOOLEAN },
+            meatOrigin: { type: Type.STRING },
+            allergens: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  category: { type: Type.STRING },
+                  found: { type: Type.BOOLEAN },
+                  notes: { type: Type.STRING }
+                },
+                required: ["category", "found"]
+              }
+            },
+            manufacturer: {
               type: Type.OBJECT,
               properties: {
-                category: { type: Type.STRING },
-                found: { type: Type.BOOLEAN },
-                notes: { type: Type.STRING }
+                name: { type: Type.STRING },
+                phone: { type: Type.STRING },
+                address: { type: Type.STRING }
               }
+            },
+            isDomestic: { type: Type.BOOLEAN },
+            priceVisible: { type: Type.BOOLEAN },
+            price: { type: Type.STRING },
+            dates: {
+              type: Type.OBJECT,
+              properties: {
+                manufactureDate: { type: Type.STRING },
+                expiryDate: { type: Type.STRING },
+                totalShelfLifeDays: { type: Type.NUMBER }
+              },
+              required: ["expiryDate", "totalShelfLifeDays"]
             }
           },
-          manufacturer: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              phone: { type: Type.STRING },
-              address: { type: Type.STRING }
-            }
-          },
-          isDomestic: { type: Type.BOOLEAN },
-          priceVisible: { type: Type.BOOLEAN },
-          price: { type: Type.STRING },
-          dates: {
-            type: Type.OBJECT,
-            properties: {
-              manufactureDate: { type: Type.STRING },
-              expiryDate: { type: Type.STRING },
-              totalShelfLifeDays: { type: Type.NUMBER }
-            }
-          }
-        },
-        required: ["productName", "isDomestic", "dates"]
+          required: ["productName", "isDomestic", "dates", "allergens", "manufacturer"]
+        }
       }
-    }
-  });
+    });
 
-  const result = JSON.parse(response.text || '{}');
-  
-  // 繁體中文合規性檢查邏輯
-  const reasons: string[] = [];
-  if (result.hasPorkOrBeef && !result.meatOrigin) reasons.push("肉品成分缺少產地標示");
-  if (!result.manufacturer?.name) reasons.push("缺少製造商名稱");
-  if (!result.manufacturer?.phone) reasons.push("缺少製造商聯絡電話");
-  if (!result.manufacturer?.address) reasons.push("缺少製造商地址");
-  if (!result.dates?.expiryDate) reasons.push("無法識別有效日期");
+    const result = JSON.parse(response.text || '{}');
+    
+    const reasons: string[] = [];
+    if (result.hasPorkOrBeef && !result.meatOrigin) reasons.push("肉品成分缺少產地標示");
+    if (!result.manufacturer?.name) reasons.push("缺少製造商名稱");
+    if (!result.manufacturer?.phone) reasons.push("缺少製造商聯絡電話");
+    if (!result.manufacturer?.address) reasons.push("缺少製造商地址");
+    if (!result.dates?.expiryDate) reasons.push("無法識別有效日期");
 
-  return {
-    ...result,
-    complianceSummary: {
-      isPassed: reasons.length === 0,
-      reasons
-    }
-  };
+    return {
+      ...result,
+      complianceSummary: {
+        isPassed: reasons.length === 0,
+        reasons
+      }
+    };
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    throw error;
+  }
 };
