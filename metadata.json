@@ -1,0 +1,21 @@
+
+{
+  "name": "Smart-DC 智能驗收系統",
+  "short_name": "SmartDC",
+  "description": "AI 驅動的倉儲驗收系統，自動掃描商品標籤以檢查合規性、過敏原、產地標示，並根據 DC 標準計算允收期。",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3081/3081559.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#2563eb",
+  "background_color": "#f8fafc",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
