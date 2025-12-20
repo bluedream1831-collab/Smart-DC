@@ -4,7 +4,8 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   // 載入環境變數 (Vercel 會在建置時自動提供 API_KEY)
-  const env = loadEnv(mode, process.cwd(), '');
+  // Fix: Cast process to any to avoid "Property 'cwd' does not exist on type 'Process'" error in TypeScript.
+  const env = loadEnv(mode, (process as any).cwd(), '');
   
   return {
     plugins: [react()],

@@ -11,7 +11,10 @@
     <!-- 加入 Tailwind Play CDN 確保樣式正常渲染 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { -webkit-tap-highlight-color: transparent; }
+        body { 
+            -webkit-tap-highlight-color: transparent; 
+            background-color: #fafaf9; /* Stone-50 */
+        }
         .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
         
         @keyframes scan {
@@ -38,6 +41,11 @@
             border-color: #3b82f6;
             border-style: solid;
         }
+
+        /* 溫和背景漸層 */
+        .gentle-bg {
+            background: radial-gradient(circle at 50% -20%, #ffffff 0%, #fafaf9 100%);
+        }
     </style>
 <script type="importmap">
 {
@@ -54,7 +62,7 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen">
+<body class="gentle-bg text-stone-900 min-h-screen">
     <div id="root"></div>
     <!-- Vite 模式下直接引用 entry point -->
     <script type="module" src="/index.tsx"></script>

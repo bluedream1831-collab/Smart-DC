@@ -10,11 +10,23 @@ export interface AllergenInfo {
   notes?: string;
 }
 
+export interface NutritionFact {
+  item: string;
+  perServing: string;
+  per100g?: string;
+  dailyValuePct?: string;
+}
+
 export interface InspectionResult {
   productName: string;
   hasPorkOrBeef: boolean;
   meatOrigin?: string;
   allergens: AllergenInfo[];
+  nutrition?: {
+    servingSize: string;
+    servingsPerPackage: string;
+    facts: NutritionFact[];
+  };
   manufacturer: {
     name: string;
     phone: string;
@@ -24,8 +36,8 @@ export interface InspectionResult {
   priceVisible: boolean;
   price?: string;
   dates: {
-    manufactureDate?: string; // YYYY-MM-DD
-    expiryDate: string;      // YYYY-MM-DD
+    manufactureDate?: string;
+    expiryDate: string;
     totalShelfLifeDays: number;
   };
   complianceSummary: {
@@ -59,5 +71,5 @@ export interface HistoryEntry {
   timestamp: number;
   result: InspectionResult;
   calc: CalculationResult;
-  image?: string;
+  images: string[];
 }

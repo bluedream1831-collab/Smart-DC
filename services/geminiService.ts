@@ -1,48 +1,41 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { InspectionResult } from '../types';
 
-/**
- * 分析產品標籤圖像以進行自動化驗收查驗
- * 使用 Gemini 3 Pro 模型進行複雜的邏輯推理與過敏原辨識
- */
-export const analyzeProductImage = async (base64Image: string): Promise<InspectionResult> => {
-  // 直接從定義的 process.env 取得金鑰 (Vite define 會在建置時替換它)
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("找不到 API 金鑰，請確認環境變數 API_KEY 已設定。");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+export const analyzeProductImage = async (base64Images: string[]): Promise<InspectionResult> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
-    請分析此商品標籤圖像以進行倉庫驗收。
-    嚴格遵守以下規則：
-    1. 識別 商品名稱。
-    2. 檢查是否含 豬肉 (Pork) 或 牛肉 (Beef)。若含肉類，必須找到 產地 (國別)。
-    3. 識別 11 類過敏原：甲殼類、芒果、花生、牛奶/羊奶、蛋、堅果類、芝麻、含麩質穀物、大豆、魚類、亞硫酸鹽。
-    4. 特別注意：若成分包含「花生油」，必須標記為「花生過敏」。
-    5. 提取 製造商名稱、電話、地址。
-    6. 判斷是否為「國內產製」(台灣) 或「國外產品」。若組裝或製造地不在台灣，皆視為國外產品。
-    7. 檢查是否標示 價格。
-    8. 提取 製造日期 (Manufacture Date) 及 有效日期/到期日 (Expiry Date)。
-    9. 計算 總保存期限 (天)。若缺製造日期，請從標籤說明估算（例如：有效期間一年 = 365天）。
-    
+    請分析這幾張商品標籤圖像，進行專業的食品驗收合規查驗。
+    請綜合所有圖片資訊，嚴格遵守台灣食藥署 (TFDA) 食品標示法規：
+
+    1. 基本資訊：識別「商品名稱」。
+    2. 製造商資訊：必須提取「製造商/委製商/進口商」的「名稱」、「電話」及「地址」。
+    3. 進出口判定（關鍵規則）：
+       - 檢查「製造地」、「產地」、「裝箱地」或「組裝地」。
+       - 除非明確標示為「臺灣」或「台灣」，否則一律判定為「國外產品 (isDomestic: false)」。
+    4. 肉品查驗：若成分包含豬肉、牛肉及其製品，必須識別「肉品原產地」。
+    5. 過敏原：檢查是否標示 11 類過敏原（甲殼、芒果、花生、奶、蛋、堅果、芝麻、麩質、大豆、魚、亞硫酸鹽）。
+    6. 價格偵測：檢查標籤上是否印有「價格」或「售價」。
+    7. 營養標示 (TFDA 八大資訊)：
+       - 提取「每一份量」及「本包裝包含份數」。
+       - 提取熱量、蛋白質、脂肪、飽和脂肪、反式脂肪、碳水化合物、糖、鈉。
+       - 數值請注意法規格式（鈉為整數，其餘可至小數第一位）。
+
     請以 JSON 格式回傳，且字串內容請使用繁體中文。
   `;
 
-  // 處理 Base64 數據
-  const data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+  const imageParts = base64Images.map(base64 => {
+    const parts = base64.split(',');
+    const data = parts.length > 1 ? parts[1] : base64;
+    return { inlineData: { data: data as string, mimeType: 'image/jpeg' } };
+  });
 
   try {
-    const response = await ai.models.generateContent({
-      // 商品標籤分析屬於複雜推理任務，使用 gemini-3-pro-preview 模型
+    const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: {
-        parts: [
-          { text: prompt },
-          { inlineData: { data, mimeType: 'image/jpeg' } }
-        ]
+        parts: [{ text: prompt }, ...imageParts]
       },
       config: {
         responseMimeType: "application/json",
@@ -50,19 +43,41 @@ export const analyzeProductImage = async (base64Image: string): Promise<Inspecti
           type: Type.OBJECT,
           properties: {
             productName: { type: Type.STRING },
+            isDomestic: { type: Type.BOOLEAN },
             hasPorkOrBeef: { type: Type.BOOLEAN },
             meatOrigin: { type: Type.STRING },
+            priceVisible: { type: Type.BOOLEAN },
+            price: { type: Type.STRING },
             allergens: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
                 properties: {
                   category: { type: Type.STRING },
-                  found: { type: Type.BOOLEAN },
-                  notes: { type: Type.STRING }
+                  found: { type: Type.BOOLEAN }
                 },
                 required: ["category", "found"]
               }
+            },
+            nutrition: {
+              type: Type.OBJECT,
+              properties: {
+                servingSize: { type: Type.STRING },
+                servingsPerPackage: { type: Type.STRING },
+                facts: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      item: { type: Type.STRING },
+                      perServing: { type: Type.STRING },
+                      per100g: { type: Type.STRING }
+                    },
+                    required: ["item", "perServing"]
+                  }
+                }
+              },
+              required: ["servingSize", "servingsPerPackage", "facts"]
             },
             manufacturer: {
               type: Type.OBJECT,
@@ -70,11 +85,9 @@ export const analyzeProductImage = async (base64Image: string): Promise<Inspecti
                 name: { type: Type.STRING },
                 phone: { type: Type.STRING },
                 address: { type: Type.STRING }
-              }
+              },
+              required: ["name", "phone", "address"]
             },
-            isDomestic: { type: Type.BOOLEAN },
-            priceVisible: { type: Type.BOOLEAN },
-            price: { type: Type.STRING },
             dates: {
               type: Type.OBJECT,
               properties: {
@@ -90,15 +103,19 @@ export const analyzeProductImage = async (base64Image: string): Promise<Inspecti
       }
     });
 
-    const result = JSON.parse(response.text || '{}');
+    const text = response.text || '{}';
+    const result = JSON.parse(text);
     
+    // 合規性邏輯檢查
     const reasons: string[] = [];
-    if (result.hasPorkOrBeef && !result.meatOrigin) reasons.push("肉品成分缺少產地標示");
-    if (!result.manufacturer?.name) reasons.push("缺少製造商名稱");
-    if (!result.manufacturer?.phone) reasons.push("缺少製造商聯絡電話");
-    if (!result.manufacturer?.address) reasons.push("缺少製造商地址");
-    if (!result.dates?.expiryDate) reasons.push("無法識別有效日期");
-
+    if (result.hasPorkOrBeef && !result.meatOrigin) reasons.push("肉品成分缺少原產地標示");
+    if (!result.manufacturer?.name || !result.manufacturer?.phone || !result.manufacturer?.address) {
+      reasons.push("製造商資訊缺失 (需含名稱/電話/地址)");
+    }
+    if (!result.nutrition?.facts || result.nutrition.facts.length < 8) {
+      reasons.push("營養標示缺失 (需含完整八大資訊)");
+    }
+    
     return {
       ...result,
       complianceSummary: {
