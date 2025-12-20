@@ -2,11 +2,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { InspectionResult } from '../types';
 
+/**
+ * 分析產品標籤圖像以進行自動化驗收查驗
+ * 使用 Gemini 3 Pro 模型進行複雜的邏輯推理與過敏原辨識
+ */
 export const analyzeProductImage = async (base64Image: string): Promise<InspectionResult> => {
-  // 直接從定義的 process.env 取得金鑰
+  // 直接從定義的 process.env 取得金鑰 (Vite define 會在建置時替換它)
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    throw new Error("找不到 API 金鑰，請檢查環境變數設定。");
+    throw new Error("找不到 API 金鑰，請確認環境變數 API_KEY 已設定。");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -27,10 +31,12 @@ export const analyzeProductImage = async (base64Image: string): Promise<Inspecti
     請以 JSON 格式回傳，且字串內容請使用繁體中文。
   `;
 
+  // 處理 Base64 數據
   const data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
 
   try {
     const response = await ai.models.generateContent({
+      // 商品標籤分析屬於複雜推理任務，使用 gemini-3-pro-preview 模型
       model: 'gemini-3-pro-preview',
       contents: {
         parts: [
