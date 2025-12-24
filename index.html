@@ -3,19 +3,36 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Smart-DC 智能驗收系統</title>
+    <!-- iOS PWA 支持 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Smart-DC">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3081/3081559.png">
+    
     <link rel="manifest" href="/metadata.json">
-    <!-- 加入 Tailwind Play CDN 確保樣式正常渲染 -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        // 防止 process.env 未定義導致的 JS 錯誤 (PWA 環境常見)
+        window.process = window.process || { env: {} };
+    </script>
+
     <style>
+        :root {
+            --sat: env(safe-area-inset-top);
+            --sar: env(safe-area-inset-right);
+            --sab: env(safe-area-inset-bottom);
+            --sal: env(safe-area-inset-left);
+        }
         body { 
             -webkit-tap-highlight-color: transparent; 
-            background-color: #fafaf9; /* Stone-50 */
+            background-color: #fafaf9;
+            min-height: 100dvh; /* 動態視窗高度 */
         }
-        .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .safe-area-pt { padding-top: var(--sat); }
+        .safe-area-pb { padding-bottom: calc(var(--sab) + 5rem); } /* 為導航欄留空間 */
         
         @keyframes scan {
             0% { top: 0%; opacity: 0; }
@@ -26,26 +43,17 @@
 
         .scan-line {
             position: absolute;
-            height: 4px;
+            height: 3px;
             width: 100%;
-            background: linear-gradient(to right, transparent, #60a5fa, #3b82f6, #60a5fa, transparent);
-            box-shadow: 0 0 15px 2px rgba(59, 130, 246, 0.5);
-            animation: scan 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            background: linear-gradient(to right, transparent, #3b82f6, transparent);
+            box-shadow: 0 0 10px 1px rgba(59, 130, 246, 0.4);
+            animation: scan 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
             z-index: 10;
         }
 
-        .viewfinder-corner {
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            border-color: #3b82f6;
-            border-style: solid;
-        }
-
-        /* 溫和背景漸層 */
-        .gentle-bg {
-            background: radial-gradient(circle at 50% -20%, #ffffff 0%, #fafaf9 100%);
-        }
+        /* 隱藏滾動條 */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 <script type="importmap">
 {
@@ -55,16 +63,15 @@
     "react/": "https://esm.sh/react@^19.2.3/",
     "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "vite": "https://esm.sh/vite@^7.3.0",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://esm.sh/vite@^7.3.0"
   }
 }
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-<body class="gentle-bg text-stone-900 min-h-screen">
+<body class="text-stone-900 overflow-x-hidden">
     <div id="root"></div>
-    <!-- Vite 模式下直接引用 entry point -->
     <script type="module" src="/index.tsx"></script>
 </body>
 </html>

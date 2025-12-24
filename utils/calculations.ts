@@ -39,15 +39,15 @@ export const calculateDates = (
     dcReleaseDate.setTime(mDate.getTime() + (storeLimit * 86400000));
     
     const mStr = formatYMD(mDate);
-    dcFormula = `[規則: ${rule.label}] 製造日期(${mStr}) + DC允收期限(${dcLimit}天) = ${formatYMD(dcAcceptanceDate)}`;
-    storeFormula = `[規則: ${rule.label}] 製造日期(${mStr}) + 門市允收期限(${storeLimit}天) = ${formatYMD(dcReleaseDate)}`;
+    dcFormula = `[規則: ${rule.label}] 製造日(${mStr}) + ${rule.dcDisplay} = ${formatYMD(dcAcceptanceDate)}`;
+    storeFormula = `[規則: ${rule.label}] 製造日(${mStr}) + ${rule.storeDisplay} = ${formatYMD(dcReleaseDate)}`;
   } else {
-    // 標準公式：到期日 - 期限 + 1天
+    // 標準公式：到期日 - 期限天數 + 1天
     dcAcceptanceDate.setDate(expiryDate.getDate() - dcLimit + 1);
     dcReleaseDate.setDate(expiryDate.getDate() - storeLimit + 1);
     
-    dcFormula = `[規則: ${rule.label}] 有效日期(${expiryStr}) - DC允收天數(${dcLimit}天) + 1天 = ${formatYMD(dcAcceptanceDate)}`;
-    storeFormula = `[規則: ${rule.label}] 有效日期(${expiryStr}) - 門市允收天數(${storeLimit}天) + 1天 = ${formatYMD(dcReleaseDate)}`;
+    dcFormula = `[規則: ${rule.label}] 有效日(${expiryStr}) - ${rule.dcDisplay} + 1天 = ${formatYMD(dcAcceptanceDate)}`;
+    storeFormula = `[規則: ${rule.label}] 有效日(${expiryStr}) - ${rule.storeDisplay} + 1天 = ${formatYMD(dcReleaseDate)}`;
   }
 
   return {

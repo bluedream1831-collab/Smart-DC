@@ -7,14 +7,16 @@ export enum OriginType {
 export interface AllergenInfo {
   category: string;
   found: boolean;
-  notes?: string;
+  reason?: string;
 }
 
 export interface NutritionFact {
   item: string;
   perServing: string;
   per100g?: string;
-  dailyValuePct?: string;
+  unit?: string;
+  isLegalRequired: boolean;
+  found: boolean;
 }
 
 export interface InspectionResult {
@@ -26,6 +28,12 @@ export interface InspectionResult {
     servingSize: string;
     servingsPerPackage: string;
     facts: NutritionFact[];
+    compliance: {
+      hasBigEight: boolean;
+      missingItems: string[];
+      unitErrors: string[];
+      positionScore: number; // 1-5 分，標示位置與清晰度
+    };
   };
   manufacturer: {
     name: string;
@@ -51,6 +59,8 @@ export interface ShelfLifeRule {
   max?: number;
   dc: number;
   store: number;
+  dcDisplay: string;
+  storeDisplay: string;
   label: string;
   isRelative?: boolean;
 }
