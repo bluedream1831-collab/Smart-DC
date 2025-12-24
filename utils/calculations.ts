@@ -12,6 +12,10 @@ export const calculateDates = (
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // 計算製造日期 (公式: 有效日 - 保存期限 + 1天)
+  const calculatedManufactureDate = new Date(expiryDate);
+  calculatedManufactureDate.setDate(expiryDate.getDate() - totalShelfLifeDays + 1);
+
   const rules: ShelfLifeRule[] = isDomestic ? DOMESTIC_RULES : IMPORT_RULES;
   
   const rule: ShelfLifeRule = rules.find(r => {
@@ -34,7 +38,7 @@ export const calculateDates = (
 
   if (rule.isRelative) {
     // D+N 邏輯 (製造日 + N天)
-    const mDate = manufactureDateStr ? new Date(manufactureDateStr) : new Date(expiryDate.getTime() - totalShelfLifeDays * 86400000);
+    const mDate = manufactureDateStr ? new Date(manufactureDateStr) : calculatedManufactureDate;
     dcAcceptanceDate.setTime(mDate.getTime() + (dcLimit * 86400000));
     dcReleaseDate.setTime(mDate.getTime() + (storeLimit * 86400000));
     
@@ -52,6 +56,8 @@ export const calculateDates = (
 
   return {
     totalShelfLife: totalShelfLifeDays,
+    manufactureDate: calculatedManufactureDate,
+    expiryDate: expiryDate,
     dcAcceptanceDate,
     dcReleaseDate,
     canAccept: today <= dcAcceptanceDate,

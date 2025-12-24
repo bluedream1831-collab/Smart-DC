@@ -67,6 +67,8 @@ export interface ShelfLifeRule {
 
 export interface CalculationResult {
   totalShelfLife: number;
+  manufactureDate: Date;
+  expiryDate: Date;
   dcAcceptanceDate: Date;
   dcReleaseDate: Date;
   canAccept: boolean;

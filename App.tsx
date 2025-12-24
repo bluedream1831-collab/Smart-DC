@@ -2,57 +2,46 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { analyzeProductImage } from './services/geminiService';
 import { calculateDates } from './utils/calculations';
-import { InspectionResult, CalculationResult, HistoryEntry, ShelfLifeRule, NutritionFact } from './types';
+import { InspectionResult, CalculationResult, HistoryEntry, ShelfLifeRule } from './types';
 import { DOMESTIC_RULES, IMPORT_RULES } from './constants';
 import { 
   Camera, 
   Upload, 
   CheckCircle, 
   AlertCircle, 
-  Loader2, 
-  Calendar, 
-  ShieldCheck, 
-  Maximize2, 
   X, 
-  Calculator, 
-  Search, 
-  Trash2, 
   History, 
-  Clock, 
   Plus,
   Play,
   Activity,
-  BookOpen,
-  Globe,
-  Home,
-  Building2,
-  Phone,
-  MapPin,
   AlertTriangle,
-  FileBarChart,
-  Info,
-  Edit2,
-  ChevronRight,
-  Filter,
-  ArrowDownCircle,
   ClipboardCheck,
   Zap,
-  Timer
+  Trash2,
+  Calendar,
+  ShieldAlert,
+  Scale,
+  FileText,
+  UserCheck,
+  BookOpen,
+  MapPin,
+  Phone,
+  Tag,
+  Info
 } from 'lucide-react';
 
 const STORAGE_KEY = 'inspection_history_v3';
 
 const ANALYSIS_STEPS = [
-  "正在連接 AI 法規核心...",
-  "掃描營養標示表格項目...",
-  "比對 TFDA 八大要件規格...",
-  "核對計量單位與數值邏輯...",
-  "計算允收期並生成報告..."
+  { title: "引擎啟動中", sub: "建立法規資料庫安全連線..." },
+  { title: "數據提取中", sub: "解析營養標示與過敏原資訊..." },
+  { title: "法規合規校對", sub: "比對 TFDA 十大標示要件..." },
+  { title: "產出驗收報告", sub: "正在生成最後報告..." }
 ];
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'main' | 'history' | 'rules'>('main');
-  const [rulesTab, setRulesTab] = useState<'domestic' | 'import' | 'nutrition'>('domestic');
+  const [rulesTab, setRulesTab] = useState<'domestic' | 'import' | 'regulations'>('domestic');
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
@@ -63,35 +52,52 @@ const App: React.FC = () => {
   
   const [manualExpiryDate, setManualExpiryDate] = useState<string>('');
   const [historyList, setHistoryList] = useState<HistoryEntry[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterPassedOnly, setFilterPassedOnly] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const removeImage = (index: number) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
+  const compressImage = (base64Str: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const MAX_SIZE = 1024;
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+    });
   };
 
-  const filteredHistory = useMemo(() => {
-    return (historyList || []).filter(item => {
-      const productName = item.result?.productName || '';
-      const matchesSearch = productName.toLowerCase().includes(searchTerm.toLowerCase());
-      const isPassed = item.result?.complianceSummary?.isPassed && item.calc?.canAccept;
-      const matchesFilter = !filterPassedOnly || isPassed;
-      return matchesSearch && matchesFilter;
-    });
-  }, [historyList, searchTerm, filterPassedOnly]);
-
+  // Fixed handleFileUpload to ensure File objects are correctly typed as Blobs for readAsDataURL
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    Array.from(files).forEach(file => {
+    
+    // Explicitly cast FileList to File[] to avoid 'unknown' inference in some environments
+    (Array.from(files) as File[]).forEach(file => {
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         if (typeof reader.result === 'string') {
-          setImages(prev => [...prev, reader.result as string]);
+          const compressed = await compressImage(reader.result);
+          setImages(prev => [...prev, compressed]);
         }
       };
       reader.readAsDataURL(file);
@@ -108,38 +114,28 @@ const App: React.FC = () => {
           result.dates.manufactureDate
         );
         setCalc(newCalc);
-        setResult(prev => prev ? ({
-          ...prev,
-          dates: { ...prev.dates, expiryDate: manualExpiryDate }
-        }) : null);
       } catch (e) { console.error(e); }
     }
-  }, [manualExpiryDate]);
+  }, [manualExpiryDate, result]);
 
   useEffect(() => {
     let interval: any;
-    if (loading && loadingStep < ANALYSIS_STEPS.length - 1) {
-      interval = setInterval(() => setLoadingStep(prev => prev + 1), 1500);
+    if (loading) {
+      interval = setInterval(() => {
+        setLoadingStep(prev => (prev < ANALYSIS_STEPS.length - 1 ? prev + 1 : prev));
+      }, 800);
+    } else {
+      setLoadingStep(0);
     }
     return () => clearInterval(interval);
-  }, [loading, loadingStep]);
+  }, [loading]);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          const hydrated = parsed.map((item: any) => ({
-            ...item,
-            calc: item.calc ? {
-              ...item.calc,
-              dcAcceptanceDate: new Date(item.calc.dcAcceptanceDate),
-              dcReleaseDate: new Date(item.calc.dcReleaseDate)
-            } : null
-          }));
-          setHistoryList(hydrated);
-        }
+        if (Array.isArray(parsed)) setHistoryList(parsed);
       } catch (e) { localStorage.removeItem(STORAGE_KEY); }
     }
   }, []);
@@ -149,13 +145,13 @@ const App: React.FC = () => {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+        video: { facingMode: 'environment', width: { ideal: 1280 } } 
       });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-    } catch (err: any) { setError('無法啟動相機：請檢查權限'); setIsCameraActive(false); }
+    } catch (err: any) { setError('無法啟動相機'); setIsCameraActive(false); }
   };
 
   const stopCamera = () => {
@@ -174,8 +170,11 @@ const App: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0);
-        setImages(prev => [...prev, canvas.toDataURL('image/jpeg', 0.8)]);
-        stopCamera();
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        compressImage(dataUrl).then(compressed => {
+          setImages(prev => [...prev, compressed]);
+          stopCamera();
+        });
       }
     }
   };
@@ -183,68 +182,101 @@ const App: React.FC = () => {
   const startAnalysis = async () => {
     if (images.length === 0) return;
     setLoading(true);
-    setLoadingStep(0);
     setError(null);
-    setResult(null);
-    
     try {
-      const analysis = await analyzeProductImage(images);
-      const expiry = analysis.dates.expiryDate;
-      let clc: CalculationResult | null = null;
-      if (expiry) clc = calculateDates(expiry, analysis.dates.totalShelfLifeDays, analysis.isDomestic, analysis.dates.manufactureDate);
-      
-      setResult(analysis);
-      setCalc(clc);
-      
-      const newEntry: HistoryEntry = {
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        result: analysis,
-        calc: clc as any,
-        images: [...images]
-      };
-      const updated = [newEntry, ...historyList];
-      setHistoryList(updated);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      setLoading(false);
-    } catch (err: any) { 
-      console.error(err);
-      setError(err.message || 'AI 辨識失敗，請重新拍攝'); 
-      setLoading(false); 
-    }
+      const analysisResult = await analyzeProductImage(images);
+      setResult(analysisResult);
+      if (analysisResult.dates.expiryDate) {
+        setManualExpiryDate(analysisResult.dates.expiryDate);
+        const newCalc = calculateDates(
+          analysisResult.dates.expiryDate,
+          analysisResult.dates.totalShelfLifeDays,
+          analysisResult.isDomestic,
+          analysisResult.dates.manufactureDate
+        );
+        setCalc(newCalc);
+        const entry: HistoryEntry = {
+          id: Date.now().toString(),
+          timestamp: Date.now(),
+          result: analysisResult,
+          calc: newCalc,
+          images: [...images]
+        };
+        const updated = [entry, ...historyList].slice(0, 50);
+        setHistoryList(updated);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      }
+    } catch (err: any) { setError(err.message); }
+    finally { setLoading(false); }
   };
 
-  const reset = () => {
-    setImages([]); setResult(null); setCalc(null); setError(null);
-    setManualExpiryDate(''); stopCamera(); setCurrentView('main');
+  const renderRegulatoryNutritionTable = (nutrition: any) => {
+    if (!nutrition) return null;
+    const findFact = (name: string) => nutrition.facts.find((f: any) => f.item.includes(name));
+    const items = [
+      { label: '熱量', key: '熱量', indent: false },
+      { label: '蛋白質', key: '蛋白質', indent: false },
+      { label: '脂肪', key: '脂肪', indent: false },
+      { label: '飽和脂肪', key: '飽和脂肪', indent: true },
+      { label: '反式脂肪', key: '反式脂肪', indent: true },
+      { label: '碳水化合物', key: '碳水化合物', indent: false },
+      { label: '糖', key: '糖', indent: true },
+      { label: '鈉', key: '鈉', indent: false },
+    ];
+
+    return (
+      <div className="bg-white p-2 flex flex-col items-center">
+        <div className="w-full max-w-[320px] border-[2px] border-black p-2 font-['Arial','sans-serif'] text-black bg-white">
+          <div className="text-center text-xl font-bold border-b-[2px] border-black py-1 mb-1 tracking-[0.5em] leading-tight">
+            營 養 標 示
+          </div>
+          <div className="flex justify-between py-0.5 text-[14px] border-b border-black">
+            <span className="font-bold">每一份量</span>
+            <span className="font-bold">{nutrition.servingSize}</span>
+          </div>
+          <div className="flex justify-between py-0.5 text-[14px] border-b-[2px] border-black">
+            <span className="font-bold">本包裝包含</span>
+            <span className="font-bold">{nutrition.servingsPerPackage} 份</span>
+          </div>
+          <div className="grid grid-cols-[1fr_80px_80px] text-right text-[11px] font-bold border-b border-black py-1">
+            <span></span>
+            <span>每份</span>
+            <span>每100公克</span>
+          </div>
+          <div className="divide-y divide-transparent">
+            {items.map((item, idx) => {
+              const fact = findFact(item.key);
+              const unit = fact?.unit || (item.key === '鈉' ? '毫克' : (item.key === '熱量' ? '大卡' : '公克'));
+              return (
+                <div key={idx} className="grid grid-cols-[1fr_80px_80px] py-0.5 text-[14px] items-center">
+                  <span className={`${item.indent ? 'pl-5' : 'font-bold'}`}>{item.label}</span>
+                  <span className="text-right">{fact?.perServing || '0'}{unit}</span>
+                  <span className="text-right">{fact?.per100g || '0'}{unit}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  const renderRuleTable = (rules: ShelfLifeRule[]) => (
-    <div className="overflow-x-auto rounded-2xl border border-stone-100 bg-white shadow-sm">
-      <table className="w-full text-left border-collapse">
-        <thead className="bg-stone-50 border-b border-stone-100">
+  const renderRulesTable = (rules: ShelfLifeRule[]) => (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm border-collapse">
+        <thead className="bg-slate-100 border-b border-slate-300">
           <tr>
-            <th className="px-4 py-3 text-[10px] font-black text-stone-400 uppercase tracking-widest">保存天數(含製造日)</th>
-            <th className="px-4 py-3 text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center">DC 允收</th>
-            <th className="px-4 py-3 text-[10px] font-black text-amber-600 uppercase tracking-widest text-center">門市 允收</th>
+            <th className="px-4 py-3 font-bold text-slate-800">保存期限範圍 (T)</th>
+            <th className="px-4 py-3 font-bold text-blue-700">DC 允收</th>
+            <th className="px-4 py-3 font-bold text-slate-800">店舖下架</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-stone-50">
-          {rules.map((rule, idx) => (
-            <tr key={idx} className="hover:bg-indigo-50/30 transition-colors">
-              <td className="px-4 py-3 font-bold text-stone-700 text-xs">
-                {rule.label}
-              </td>
-              <td className="px-4 py-3 text-center">
-                <span className="inline-block px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md font-black text-xs min-w-[4rem]">
-                  {rule.dcDisplay}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-center">
-                <span className="inline-block px-2 py-1 bg-amber-50 text-amber-700 rounded-md font-black text-xs min-w-[4rem]">
-                  {rule.storeDisplay}
-                </span>
-              </td>
+        <tbody className="divide-y divide-slate-200">
+          {rules.map((rule, i) => (
+            <tr key={i} className="hover:bg-slate-50 transition-colors">
+              <td className="px-4 py-3 font-medium">{rule.label}</td>
+              <td className="px-4 py-3 font-bold text-blue-600">{rule.dcDisplay}</td>
+              <td className="px-4 py-3 font-bold">{rule.storeDisplay}</td>
             </tr>
           ))}
         </tbody>
@@ -252,318 +284,278 @@ const App: React.FC = () => {
     </div>
   );
 
-  const REQUIRED_NUTRIENTS = ["熱量", "蛋白質", "脂肪", "飽和脂肪", "反式脂肪", "碳水化合物", "糖", "鈉"];
-
   return (
-    <div className="max-w-4xl mx-auto min-h-[100dvh] flex flex-col safe-area-pt bg-stone-50">
-      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-xl border-b border-stone-100 px-6 py-4 flex justify-between items-center shrink-0">
-        <h1 className="text-xl font-black">Smart-DC <span className="text-indigo-600 text-xs">法規驗收系統</span></h1>
-        {(images.length > 0 || isCameraActive || currentView !== 'main') && !loading && (
-          <button onClick={reset} className="w-10 h-10 flex items-center justify-center bg-stone-50 rounded-full active:scale-90 transition-transform"><X size={20} /></button>
-        )}
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-20">
+      <header className="sticky top-0 z-50 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="w-6 h-6 text-blue-600" />
+          <h1 className="text-lg font-bold">標籤合規 AI 驗收</h1>
+        </div>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-full">
+          <button onClick={() => setCurrentView('main')} className={`px-4 py-1.5 rounded-full text-sm font-medium ${currentView === 'main' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>掃描</button>
+          <button onClick={() => setCurrentView('history')} className={`px-4 py-1.5 rounded-full text-sm font-medium ${currentView === 'history' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>歷史</button>
+          <button onClick={() => setCurrentView('rules')} className={`px-4 py-1.5 rounded-full text-sm font-medium ${currentView === 'rules' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>法規</button>
+        </div>
       </header>
 
-      <main className="flex-1 p-4 overflow-y-auto scrollbar-hide">
-        {error && (
-          <div className="mb-4 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 text-xs font-bold flex items-center gap-2 animate-bounce">
-            <AlertCircle size={16} /> {error}
-          </div>
-        )}
+      <main className="max-w-4xl mx-auto p-4">
+        {currentView === 'main' && (
+          <div className="space-y-6">
+            {!result && !loading && (
+              <div className="bg-white rounded-3xl shadow-xl p-8 text-center border border-slate-200">
+                <Camera className="w-16 h-16 mx-auto mb-4 text-blue-100" />
+                <h2 className="text-2xl font-bold mb-6">開始商品檢驗</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  <button onClick={startCamera} className="p-6 rounded-2xl bg-blue-600 text-white shadow-lg"><Camera className="mx-auto mb-2" />使用相機</button>
+                  <button onClick={() => fileInputRef.current?.click()} className="p-6 rounded-2xl border-2 border-slate-200 text-slate-600"><Upload className="mx-auto mb-2" />上傳照片</button>
+                </div>
+                {images.length > 0 && (
+                  <div className="mt-6 p-4 bg-slate-50 rounded-2xl">
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {images.map((img, idx) => (
+                        <div key={idx} className="relative w-16 h-16"><img src={img} className="w-full h-full object-cover rounded-lg" /><X onClick={() => setImages(prev => prev.filter((_, i) => i !== idx))} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 w-5 h-5 cursor-pointer" /></div>
+                      ))}
+                      <Plus onClick={() => fileInputRef.current?.click()} className="w-16 h-16 p-5 border-2 border-dashed border-slate-300 rounded-lg text-slate-400 cursor-pointer" />
+                    </div>
+                    <button onClick={startAnalysis} className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold">開始 AI 辨識</button>
+                  </div>
+                )}
+              </div>
+            )}
 
-        {currentView === 'main' ? (
-          loading ? (
-            <div className="py-20 flex flex-col items-center text-center justify-center">
-              <div className="relative mb-10">
-                <div className="w-24 h-24 border-8 border-indigo-100 rounded-full"></div>
-                <div className="absolute inset-0 w-24 h-24 border-8 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                <div className="absolute inset-0 flex items-center justify-center text-indigo-600">
-                  <Activity size={32} />
+            {isCameraActive && (
+              <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+                <video ref={videoRef} className="flex-1 object-contain" playsInline muted />
+                <div className="p-8 bg-black/90 flex justify-center gap-12">
+                  <X onClick={stopCamera} className="w-12 h-12 text-white p-2 bg-white/10 rounded-full" />
+                  <div onClick={capturePhoto} className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center"><div className="w-12 h-12 bg-white rounded-full" /></div>
+                  <div className="w-12" />
                 </div>
               </div>
-              <p className="text-2xl font-black text-stone-900 mb-4">{ANALYSIS_STEPS[loadingStep]}</p>
-              <p className="text-stone-400 font-bold text-sm">正在進行 TFDA 八大營養要件合規性審查...</p>
-            </div>
-          ) : result ? (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-40 space-y-4">
-              {/* 總結狀態 */}
-              <div className={`p-6 rounded-[2rem] flex flex-col gap-4 shadow-xl ${result.complianceSummary.isPassed && calc?.canAccept ? 'bg-indigo-600 text-white' : 'bg-rose-600 text-white'}`}>
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
-                    {result.complianceSummary.isPassed && calc?.canAccept ? <CheckCircle size={32} /> : <AlertTriangle size={32} />}
+            )}
+
+            {loading && (
+              <div className="bg-white p-12 rounded-3xl text-center space-y-4">
+                <Activity className="w-12 h-12 text-blue-600 mx-auto animate-spin" />
+                <h3 className="text-xl font-bold">{ANALYSIS_STEPS[loadingStep].title}</h3>
+                <p className="text-slate-500">{ANALYSIS_STEPS[loadingStep].sub}</p>
+              </div>
+            )}
+
+            {result && calc && !loading && (
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                {/* 判定總結卡片 */}
+                <div className={`p-6 rounded-3xl border-2 shadow-sm ${calc.canAccept && result.complianceSummary.isPassed ? 'border-emerald-200 bg-emerald-50/20' : 'border-amber-200 bg-amber-50/20'}`}>
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      {calc.canAccept && result.complianceSummary.isPassed ? <CheckCircle className="text-emerald-500 w-10 h-10" /> : <AlertTriangle className="text-amber-500 w-10 h-10" />}
+                      <div>
+                        <h3 className="text-2xl font-bold text-slate-800">{result.productName}</h3>
+                        <p className="text-sm font-bold opacity-70">
+                          {calc.canAccept && result.complianceSummary.isPassed ? '✅ 檢驗合格：可辦理入庫' : '❌ 檢驗不合格：請辦理退貨'}
+                        </p>
+                      </div>
+                    </div>
+                    <X onClick={() => {setResult(null); setImages([]);}} className="text-slate-400 cursor-pointer p-2 hover:bg-slate-100 rounded-full transition-colors" />
                   </div>
-                  <div>
-                    <h3 className="text-2xl font-black leading-none">{result.complianceSummary.isPassed && calc?.canAccept ? '符合法規與允收期' : '標示不合規 / 拒收'}</h3>
-                    <p className="text-white/70 text-xs font-bold mt-2 truncate">{result.productName}</p>
-                  </div>
-                </div>
-                {result.complianceSummary.reasons.length > 0 && (
-                  <div className="bg-black/10 p-4 rounded-xl space-y-1">
-                    {result.complianceSummary.reasons.map((r, i) => (
-                      <p key={i} className="text-[11px] font-bold flex items-start gap-2">
-                        <span className="mt-1 w-1 h-1 bg-white rounded-full shrink-0"></span>
-                        {r}
+
+                  {/* 如果不合格，顯示具體原因 */}
+                  {(!calc.canAccept || !result.complianceSummary.isPassed) && (
+                    <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl">
+                      <p className="text-red-800 font-bold mb-2 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4" /> 異常說明：
                       </p>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 辨識到的日期數據區塊 */}
-              <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-stone-100">
-                <h4 className="text-[10px] font-black text-stone-400 uppercase mb-4 flex items-center gap-2"><Calendar size={14}/> AI 辨識日期原始數據</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                    <span className="text-[9px] font-black text-indigo-500 uppercase flex items-center gap-1 mb-1">
-                      <CheckCircle size={10} /> 有效日期 (辨識)
-                    </span>
-                    <p className="text-lg font-black text-indigo-700">{result.dates.expiryDate || '未偵測'}</p>
-                  </div>
-                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100">
-                    <span className="text-[9px] font-black text-stone-400 uppercase flex items-center gap-1 mb-1">
-                      <Clock size={10} /> 製造日期 (辨識)
-                    </span>
-                    <p className="text-lg font-black text-stone-700">{result.dates.manufactureDate || '未標示'}</p>
-                  </div>
-                  <div className="p-4 bg-stone-50 rounded-2xl border border-stone-100">
-                    <span className="text-[9px] font-black text-stone-400 uppercase flex items-center gap-1 mb-1">
-                      <Timer size={10} /> 總保存期間
-                    </span>
-                    <p className="text-lg font-black text-stone-700">{result.dates.totalShelfLifeDays ? `${result.dates.totalShelfLifeDays} 天` : '未辨識'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 營養標示法規檢核卡 */}
-              <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-stone-100">
-                <div className="flex items-center justify-between mb-6">
-                  <h4 className="text-sm font-black text-stone-900 flex items-center gap-2">
-                    <ClipboardCheck size={18} className="text-indigo-600" />
-                    TFDA 營養標示八大要件檢核
-                  </h4>
-                  <div className="px-3 py-1 bg-stone-50 rounded-lg text-[10px] font-black text-stone-400 uppercase">
-                    位置評分: {result.nutrition?.compliance?.positionScore || 0}/5
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {REQUIRED_NUTRIENTS.map(item => {
-                    const foundFact = result.nutrition?.facts.find(f => f.item.includes(item));
-                    const isMissing = !foundFact || !foundFact.found;
-                    return (
-                      <div key={item} className={`p-3 rounded-2xl border flex flex-col gap-1 transition-all ${isMissing ? 'bg-rose-50 border-rose-100 text-rose-700' : 'bg-stone-50 border-stone-100 text-stone-700'}`}>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black">{item}</span>
-                          {isMissing ? <X size={12} /> : <CheckCircle size={12} className="text-emerald-500" />}
-                        </div>
-                        <span className="text-[13px] font-black">{foundFact?.perServing || '--'} <span className="text-[9px] opacity-60">{foundFact?.unit}</span></span>
-                      </div>
-                    );
-                  })}
-                </div>
-                
-                {result.nutrition?.compliance?.unitErrors && result.nutrition.compliance.unitErrors.length > 0 && (
-                  <div className="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-xl flex items-center gap-2 text-[11px] font-bold text-amber-700">
-                    <AlertCircle size={14} /> 單位警告：{result.nutrition.compliance.unitErrors.join(', ')}
-                  </div>
-                )}
-              </div>
-
-              {/* 允收期卡片 */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-stone-100">
-                  <h4 className="text-[10px] font-black text-stone-400 uppercase mb-6 flex items-center gap-2"><Calculator size={14}/> 驗收期試算結果</h4>
-                  {calc ? (
-                    <div className="space-y-6">
-                      <div className="relative pl-6">
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 rounded-full"></div>
-                        <span className="text-[10px] font-black text-indigo-500 uppercase">DC 允收截止 (D-N)</span>
-                        <p className="text-2xl font-black">{calc.dcAcceptanceDate.toLocaleDateString('zh-TW')}</p>
-                        <p className="text-[9px] text-stone-400 font-mono mt-1 leading-tight">{calc.dcFormula}</p>
-                      </div>
-                      <div className="relative pl-6">
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500 rounded-full"></div>
-                        <span className="text-[10px] font-black text-amber-500 uppercase">門市銷售截止</span>
-                        <p className="text-2xl font-black">{calc.dcReleaseDate.toLocaleDateString('zh-TW')}</p>
-                        <p className="text-[9px] text-stone-400 font-mono mt-1 leading-tight">{calc.storeFormula}</p>
-                      </div>
+                      <ul className="list-disc list-inside text-sm text-red-700 space-y-1 font-medium">
+                        {!calc.canAccept && <li>效期超過 DC 允收期限</li>}
+                        {result.complianceSummary.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                      </ul>
                     </div>
-                  ) : <div className="py-10 text-center text-stone-300 italic text-sm">請手動輸入到期日以補全計算</div>}
-                  
-                  <div className="mt-8 p-5 bg-stone-50 rounded-2xl">
-                    <label className="text-[10px] font-black text-stone-400 uppercase mb-2 block">手動修正到期日</label>
-                    <input type="date" className="w-full bg-white border border-stone-200 rounded-xl px-4 py-3 font-black text-indigo-700 text-sm focus:ring-2 ring-indigo-500 outline-none" value={manualExpiryDate} onChange={(e) => setManualExpiryDate(e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-stone-100">
-                    <h4 className="text-[10px] font-black text-stone-400 uppercase mb-4 flex items-center gap-2"><Zap size={14}/> 核心標籤資訊</h4>
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center p-3 bg-stone-50 rounded-xl">
-                        <span className="text-xs font-bold text-stone-400">產地判定</span>
-                        <span className="text-xs font-black">{result.isDomestic ? '台灣 (國內品)' : '進口品'}</span>
-                      </div>
-                      <div className="flex justify-between items-center p-3 bg-stone-50 rounded-xl">
-                        <span className="text-xs font-bold text-stone-400">肉品原產地</span>
-                        <span className="text-xs font-black">{result.hasPorkOrBeef ? (result.meatOrigin || '未標示') : '不含豬牛'}</span>
-                      </div>
-                      <div className="p-3 bg-stone-50 rounded-xl">
-                        <span className="text-[10px] font-black text-stone-400 block mb-1">製造廠商</span>
-                        <p className="text-xs font-black text-stone-800">{result.manufacturer.name || '無法識別'}</p>
-                        <p className="text-[10px] font-bold text-stone-400 mt-0.5">{result.manufacturer.phone}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : isCameraActive ? (
-            <div className="fixed inset-0 z-50 bg-stone-950 flex flex-col">
-              <div className="flex-1 relative">
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                <div className="absolute inset-0 flex items-center justify-center p-8 pointer-events-none">
-                  <div className="w-full aspect-[4/3] max-w-sm rounded-3xl border-2 border-white/50 relative overflow-hidden">
-                    <div className="scan-line"></div>
-                  </div>
-                </div>
-                <button onClick={stopCamera} className="absolute top-10 right-6 w-12 h-12 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center text-white"><X size={24}/></button>
-              </div>
-              <div className="p-12 pb-24 bg-stone-950 flex justify-center">
-                <button onClick={capturePhoto} className="w-24 h-24 rounded-full border-8 border-white/20 flex items-center justify-center active:scale-90 transition-transform">
-                  <div className="w-16 h-16 bg-white rounded-full shadow-2xl shadow-white/20"></div>
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="py-8 space-y-8 animate-in fade-in duration-700">
-              <div className="bg-white rounded-[3rem] p-12 text-center space-y-12 shadow-sm border border-stone-100">
-                <div className="relative mx-auto w-32 h-32 flex items-center justify-center bg-indigo-50 rounded-[2.5rem] text-indigo-600 shadow-inner">
-                  <Maximize2 size={56} />
-                  <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg">
-                    <CheckCircle size={24} />
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <h2 className="text-4xl font-black tracking-tight">智能法規驗收</h2>
-                  <p className="text-stone-400 font-bold text-base px-6 leading-relaxed">拍攝標籤照片，AI 將自動對比 TFDA 營養八大要件與 7-11 允收期規則。</p>
-                </div>
-                <div className="grid grid-cols-1 gap-4 max-w-sm mx-auto">
-                  {images.length > 0 ? (
-                    <div className="space-y-6">
-                      <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide px-2">
-                        {images.map((img, i) => (
-                          <div key={i} className="relative shrink-0 shadow-lg group">
-                            <img src={img} className="w-24 h-32 object-cover rounded-2xl border border-stone-200" />
-                            <button onClick={()=>removeImage(i)} className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-1.5 shadow-md group-active:scale-90"><X size={12}/></button>
-                          </div>
-                        ))}
-                        <button onClick={startCamera} className="w-24 h-32 border-2 border-dashed border-stone-200 rounded-2xl flex items-center justify-center text-stone-300 hover:text-indigo-500 hover:border-indigo-200 transition-all"><Plus/></button>
-                      </div>
-                      <button onClick={startAnalysis} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-black text-xl flex items-center justify-center gap-3 shadow-xl shadow-indigo-100 active:scale-[0.98] transition-all">
-                        <Play size={24} fill="currentColor"/> 啟動 AI 法規審查
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <button onClick={startCamera} className="w-full py-6 bg-indigo-600 text-white rounded-3xl font-black text-xl flex items-center justify-center gap-4 shadow-xl shadow-indigo-100 active:scale-[0.98] transition-all"><Camera size={28} /> 拍照掃描標籤</button>
-                      <button onClick={() => fileInputRef.current?.click()} className="w-full py-5 bg-white text-stone-600 border-2 border-stone-100 rounded-3xl font-black text-lg flex items-center justify-center gap-3 shadow-sm active:bg-stone-50 transition-all"><Upload size={22} /> 上傳現有照片</button>
-                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" multiple onChange={handleFileUpload} />
-                    </>
                   )}
-                </div>
-              </div>
-            </div>
-          )
-        ) : currentView === 'history' ? (
-          <div className="animate-in fade-in slide-in-from-right-4 duration-500 pb-40">
-            <div className="flex items-center justify-between mb-8 px-2">
-              <h2 className="text-3xl font-black">歷史驗收報告</h2>
-              <button onClick={() => { if(confirm('清除所有紀錄？')) { setHistoryList([]); localStorage.removeItem(STORAGE_KEY); } }} className="p-3 text-stone-300 hover:text-rose-500 transition-colors"><Trash2 size={24} /></button>
-            </div>
-            {filteredHistory.length === 0 ? (
-              <div className="py-32 text-center text-stone-300 font-bold italic">尚無歷史報告</div>
-            ) : (
-              <div className="space-y-4">
-                {filteredHistory.map((item) => (
-                  <div key={item.id} onClick={() => { setResult(item.result); setCalc(item.calc); setImages(item.images || []); setCurrentView('main'); }} className="bg-white p-5 rounded-[2rem] border border-stone-100 shadow-sm flex gap-5 items-center active:bg-stone-50 transition-all">
-                    <div className="w-16 h-20 bg-stone-50 rounded-xl overflow-hidden shrink-0 border border-stone-100">
-                      <img src={item.images?.[0]} className="w-full h-full object-cover" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-black text-stone-900 truncate text-base">{item.result.productName}</h4>
-                      <p className="text-[10px] text-stone-400 font-bold uppercase mt-1">{new Date(item.timestamp).toLocaleString()}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <div className={`px-3 py-1 rounded-full text-[9px] font-black border ${item.result.complianceSummary.isPassed && item.calc?.canAccept ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>
-                          {item.result.complianceSummary.isPassed && item.calc?.canAccept ? 'PASSED' : 'REJECTED'}
+
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* 第一欄：日期溯源與廠商 */}
+                    <div className="space-y-4">
+                      {/* 商品日期卡片 - 根據使用者需求強化顯示 */}
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-2 opacity-10"><Calendar className="w-12 h-12" /></div>
+                        <div className="flex items-center gap-2 font-bold mb-4 border-b pb-2 text-blue-700">
+                          <Calendar className="w-4 h-4" /> 日期溯源資訊
                         </div>
-                        {item.result.nutrition?.compliance?.hasBigEight && (
-                          <div className="px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full text-[9px] font-black">法規合規</div>
-                        )}
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-end border-b border-slate-50 pb-2">
+                            <div>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase">有效日期 (到期日)</p>
+                              <p className="font-black text-xl text-slate-800">{calc.expiryDate.toLocaleDateString('zh-TW')}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] text-slate-400 font-bold uppercase">保存期限</p>
+                              <p className="font-bold text-slate-700">{result.dates.totalShelfLifeDays} 天</p>
+                            </div>
+                          </div>
+                          
+                          <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-[10px] text-blue-600 font-black uppercase">計算製造日期</p>
+                              <div className="group relative cursor-help">
+                                <Info className="w-3 h-3 text-blue-400" />
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-[10px] rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                  法規公式：到期日 - 保存期限 + 1天
+                                </div>
+                              </div>
+                            </div>
+                            <p className="font-black text-xl text-blue-800">{calc.manufactureDate.toLocaleDateString('zh-TW')}</p>
+                            <p className="text-[9px] text-blue-500 mt-1 font-mono italic">
+                              {calc.expiryDate.toLocaleDateString('zh-TW')} - {result.dates.totalShelfLifeDays}天 + 1天
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 允收卡片 */}
+                      <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-xl">
+                        <div className="flex items-center gap-2 font-bold mb-4 border-b border-white/10 pb-2">
+                          <ClipboardCheck className="w-4 h-4 text-blue-400" /> DC 允收判定基準
+                        </div>
+                        <div className="space-y-2">
+                           <p className="text-[10px] text-white/50 font-bold uppercase">最後允收進貨日</p>
+                           <p className={`text-3xl font-black ${calc.canAccept ? 'text-emerald-400' : 'text-red-400'}`}>
+                             {calc.dcAcceptanceDate.toLocaleDateString('zh-TW')}
+                           </p>
+                           <p className="text-[10px] text-white/40 mt-1 font-mono bg-white/5 p-2 rounded-lg italic leading-tight">
+                             公式：{calc.dcFormula}
+                           </p>
+                        </div>
+                      </div>
+
+                      {/* 廠商資訊卡片 */}
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="flex items-center gap-2 font-bold mb-4 border-b pb-2 text-blue-700">
+                          <UserCheck className="w-4 h-4" /> 製造廠商與標示
+                        </div>
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase">廠商名稱</p>
+                            <p className="font-bold text-sm">{result.manufacturer.name || '未辨識'}</p>
+                          </div>
+                          <div className="flex gap-4">
+                            <div className="flex-1">
+                              <p className="text-[10px] text-slate-400 font-bold uppercase">建議售價</p>
+                              <p className="font-bold text-sm flex items-center gap-1"><Tag className="w-3 h-3 text-slate-400" /> {result.price || '未標示'}</p>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-[10px] text-slate-400 font-bold uppercase">產地屬性</p>
+                              <p className="font-bold text-sm">{result.isDomestic ? '國產品' : '進口品'}</p>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    <ChevronRight size={20} className="text-stone-300" />
+
+                    {/* 第二欄：營養標示表格 */}
+                    <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center">
+                      <p className="text-[10px] font-bold text-slate-400 mb-3 uppercase tracking-widest bg-slate-100 px-3 py-1 rounded-full">
+                        TFDA 食品標示法規樣式對照
+                      </p>
+                      {renderRegulatoryNutritionTable(result.nutrition)}
+                      
+                      <div className="mt-6 w-full space-y-4">
+                        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                          <p className="text-[10px] text-amber-800 font-black uppercase mb-2 flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3" /> 過敏原與特規標示
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.allergens.filter(a => a.found).length > 0 ? (
+                              result.allergens.filter(a => a.found).map((a, i) => (
+                                <span key={i} className="bg-amber-200 text-amber-900 text-[10px] px-2 py-0.5 rounded font-black border border-amber-300">
+                                  {a.category}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-emerald-700 text-[10px] font-bold italic">✅ 未偵測到法定過敏原</span>
+                            )}
+                          </div>
+                          {result.hasPorkOrBeef && (
+                            <div className="mt-3 pt-3 border-t border-amber-200">
+                              <p className="text-[10px] text-amber-800 font-bold">肉品原產地標示：</p>
+                              <p className="font-black text-amber-900">{result.meatOrigin || '⚠️ 未偵測到明確產地'}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                ))}
+                </div>
               </div>
             )}
           </div>
-        ) : (
-          <div className="animate-in fade-in slide-in-from-right-4 duration-500 pb-44 px-1">
-            <div className="flex items-center gap-4 mb-10">
-              <div className="w-16 h-16 bg-indigo-600 text-white rounded-[2rem] flex items-center justify-center shadow-xl shadow-indigo-100">
-                <BookOpen size={32} />
+        )}
+
+        {currentView === 'history' && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 mb-4 bg-white p-4 rounded-2xl border border-slate-200">
+               <History className="text-blue-600 w-5 h-5" />
+               <h3 className="font-bold">檢驗歷史紀錄</h3>
+               <span className="text-xs text-slate-400 ml-auto">最多保留 50 筆</span>
+            </div>
+            {historyList.length === 0 ? (
+              <div className="text-center py-20 text-slate-400">
+                <BookOpen className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                <p>尚無任何檢驗紀錄</p>
               </div>
-              <h2 className="text-3xl font-black">驗收規則手冊</h2>
-            </div>
-
-            <div className="flex p-1.5 bg-stone-200/50 rounded-[1.5rem] mb-8 overflow-x-auto border border-stone-200/50 sticky top-0 z-10 backdrop-blur-xl">
-              <button onClick={() => setRulesTab('domestic')} className={`flex-1 min-w-[6rem] px-5 py-3 rounded-xl font-black text-xs transition-all ${rulesTab === 'domestic' ? 'bg-white text-indigo-600 shadow-md' : 'text-stone-500'}`}>國內品</button>
-              <button onClick={() => setRulesTab('import')} className={`flex-1 min-w-[6rem] px-5 py-3 rounded-xl font-black text-xs transition-all ${rulesTab === 'import' ? 'bg-white text-indigo-600 shadow-md' : 'text-stone-500'}`}>進口品</button>
-              <button onClick={() => setRulesTab('nutrition')} className={`flex-1 min-w-[6rem] px-5 py-3 rounded-xl font-black text-xs transition-all ${rulesTab === 'nutrition' ? 'bg-white text-indigo-600 shadow-md' : 'text-stone-500'}`}>法規標示</button>
-            </div>
-
-            <div className="space-y-6">
-              {rulesTab === 'domestic' && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-indigo-700 text-xs font-bold leading-relaxed">
-                    <Info size={20} className="shrink-0" />
-                    國內品規則：嚴格對齊 7-11 官方允收表 (21個級距)。
-                  </div>
-                  {renderRuleTable(DOMESTIC_RULES)}
-                </div>
-              )}
-              
-              {rulesTab === 'import' && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-indigo-700 text-xs font-bold leading-relaxed">
-                    <Globe size={20} className="shrink-0" />
-                    進口品規則：依照有效日期回推允收天數 (16個級距)。
-                  </div>
-                  {renderRuleTable(IMPORT_RULES)}
-                </div>
-              )}
-
-              {rulesTab === 'nutrition' && (
-                <div className="space-y-6">
-                  <div className="bg-white rounded-[2.5rem] p-8 border border-stone-100 shadow-sm space-y-6">
-                    <h3 className="text-xl font-black text-stone-900 flex items-center gap-2"><CheckCircle size={24} className="text-indigo-500"/> 營養標示八大要件</h3>
-                    <div className="grid grid-cols-1 gap-3">
-                      {REQUIRED_NUTRIENTS.map((item, i) => (
-                        <div key={i} className="flex items-center gap-4 p-4 bg-stone-50 rounded-2xl font-black text-sm">
-                          <div className="w-6 h-6 bg-white border border-stone-200 rounded-lg flex items-center justify-center text-[11px] text-stone-400">{i+1}</div>
-                          {item}
-                        </div>
-                      ))}
+            ) : (
+              historyList.map((item) => (
+                <div key={item.id} className="bg-white p-4 rounded-2xl border flex items-center gap-4 hover:shadow-md transition-shadow">
+                  <img src={item.images[0]} className="w-16 h-16 rounded-xl object-cover border border-slate-100 shadow-sm" alt="Thumbnail" />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold truncate text-slate-800">{item.result.productName}</h4>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${item.calc.canAccept ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        {item.calc.canAccept ? '允收' : '拒收'}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold">{new Date(item.timestamp).toLocaleString()}</span>
                     </div>
-                    <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl space-y-2">
-                      <p className="text-xs font-black text-rose-700">⚠️ 單位標示要求：</p>
-                      <ul className="text-[11px] font-bold text-rose-600/80 list-disc pl-4 space-y-1">
-                        <li>熱量：kcal (大卡)</li>
-                        <li>鈉：mg (毫克)</li>
-                        <li>蛋白質、脂肪、碳水化合物等：g (公克)</li>
-                        <li>標示順序與位置應清晰固定</li>
-                      </ul>
-                    </div>
+                  </div>
+                  <button onClick={() => {setResult(item.result); setCalc(item.calc); setCurrentView('main');}} className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors">
+                    <Play className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => {
+                    const updated = historyList.filter(h => h.id !== item.id);
+                    setHistoryList(updated);
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+                  }} className="p-3 text-slate-300 hover:text-red-500 transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {currentView === 'rules' && (
+          <div className="space-y-6">
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              <button onClick={() => setRulesTab('domestic')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${rulesTab === 'domestic' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white border text-slate-500'}`}>國產品規則</button>
+              <button onClick={() => setRulesTab('import')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${rulesTab === 'import' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white border text-slate-500'}`}>進口品規則</button>
+              <button onClick={() => setRulesTab('regulations')} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${rulesTab === 'regulations' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-white border text-slate-500'}`}>TFDA 標示要件</button>
+            </div>
+            <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+              {rulesTab === 'domestic' && renderRulesTable(DOMESTIC_RULES)}
+              {rulesTab === 'import' && renderRulesTable(IMPORT_RULES)}
+              {rulesTab === 'regulations' && (
+                <div className="p-8 space-y-6">
+                  <div className="flex items-center gap-3 border-b pb-4"><BookOpen className="text-blue-600" /><h3 className="text-xl font-bold">食品標示法規摘要</h3></div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {["品名、重量、淨重或容量", "食品添加物名稱", "廠商名稱、電話與地址", "有效日期 (YYYY/MM/DD)", "營養標示 (熱量與七大要素)", "過敏原強制警語", "產地標示 (國內/進口)", "含豬/牛成分產地標示"].map((item, i) => (
+                      <div key={i} className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
+                        <span className="font-bold text-slate-700 text-sm">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                    <p className="text-xs text-amber-800 leading-relaxed italic">
+                      * 依食安法第22條，不符標示規定之商品最高可處 300 萬元罰鍰，驗收人員應嚴格執行影像存證。
+                    </p>
                   </div>
                 </div>
               )}
@@ -571,24 +563,18 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
-      
-      {!isCameraActive && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-3xl border-t border-stone-100 px-6 py-8 pb-[calc(2rem+env(safe-area-inset-bottom))] flex justify-around shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-40">
-           <button onClick={() => { setCurrentView('main'); reset(); }} className={`flex flex-col items-center gap-2 transition-all ${currentView === 'main' ? 'text-indigo-600 scale-110' : 'text-stone-300'}`}>
-             <Maximize2 size={26} strokeWidth={3} />
-             <span className="text-[10px] font-black uppercase tracking-widest">驗收</span>
-           </button>
-           <button onClick={() => setCurrentView('history')} className={`flex flex-col items-center gap-2 transition-all ${currentView === 'history' ? 'text-indigo-600 scale-110' : 'text-stone-300'}`}>
-             <History size={26} strokeWidth={3} />
-             <span className="text-[10px] font-black uppercase tracking-widest">紀錄</span>
-           </button>
-           <button onClick={() => setCurrentView('rules')} className={`flex flex-col items-center gap-2 transition-all ${currentView === 'rules' ? 'text-indigo-600 scale-110' : 'text-stone-300'}`}>
-             <BookOpen size={26} strokeWidth={3} />
-             <span className="text-[10px] font-black uppercase tracking-widest">手冊</span>
-           </button>
-        </nav>
-      )}
+
+      <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*" multiple />
       <canvas ref={canvasRef} className="hidden" />
+
+      {/* 底部導覽欄 */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 md:hidden">
+        <div className="bg-white/90 backdrop-blur rounded-2xl p-2 flex justify-around border shadow-2xl">
+          <button onClick={() => {setCurrentView('main'); setResult(null);}} className={`p-3 rounded-xl transition-all ${currentView === 'main' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-blue-600'}`}><Camera /></button>
+          <button onClick={() => setCurrentView('history')} className={`p-3 rounded-xl transition-all ${currentView === 'history' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-blue-600'}`}><History /></button>
+          <button onClick={() => setCurrentView('rules')} className={`p-3 rounded-xl transition-all ${currentView === 'rules' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-blue-600'}`}><Scale /></button>
+        </div>
+      </div>
     </div>
   );
 };

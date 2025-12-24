@@ -2,26 +2,21 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { InspectionResult } from '../types';
 
+/**
+ * 分析食品標籤影像，提取合規資訊
+ */
 export const analyzeProductImage = async (base64Images: string[]): Promise<InspectionResult> => {
+  // 使用環境變數中的 API_KEY 初始化
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  const prompt = `
-    你現在是「台灣食品法規稽查員」。請嚴格依照台灣 TFDA 營養標示格式規範分析圖中標籤。
-
-    任務重點：
-    1. 營養標示八大要件檢查：必須包含「熱量、蛋白質、脂肪、飽和脂肪、反式脂肪、碳水化合物、糖、鈉」。
-    2. 單位檢核：熱量(kcal)、鈉(mg)、其餘(g)。若圖中單位錯誤(如鈉標示為g)，必須記錄。
-    3. 標示方式：檢查是否有「每份」及「每100公克/毫升」。
-    4. 內容一致性：成分表中的含糖/含油成分是否與營養標示數據邏輯一致。
-    5. 位置與清晰度：評估標示是否位於顯著位置且字體清晰，給予 1-5 分評分。
-
-    請以 JSON 格式回傳：
-    - nutrition.facts 必須包含所有八大項目，並註明 found (boolean) 與 unit。
-    - nutrition.compliance 記錄缺少的項目 (missingItems) 與 單位錯誤 (unitErrors)。
-    - 若八大要件缺一不可，否則 complianceSummary.isPassed 為 false。
-    
-    使用繁體中文。
-  `;
+  const systemInstruction = `身為台灣食品標籤專家，請從影像提取 JSON。
+    規則：
+    1. 營養標示：必含八大項數據，並精確提取其標示單位 (kcal, g, mg)。
+    2. 過敏原偵測：核對台灣法規強制的11項過敏原（甲殼類、芒果、花生、奶、蛋、堅果、芝麻、麩質穀物、大豆、魚、亞硫酸鹽），回傳發現結果。
+    3. 日期：有效與製造日期(YYYY/MM/DD)。
+    4. 肉品：豬牛須產地。
+    5. 國內/進口：產地歸屬。
+    輸出必須為純 JSON，格式必須完整閉合。`;
 
   const imageParts = base64Images.map(base64 => {
     const parts = base64.split(',');
@@ -30,12 +25,14 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Inspe
   });
 
   try {
+    // 使用 gemini-3-flash-preview 進行快速提取
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
-        parts: [{ text: prompt }, ...imageParts]
+        parts: [{ text: "快速提取完整標籤資訊 JSON。" }, ...imageParts]
       },
       config: {
+        systemInstruction,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -50,8 +47,7 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Inspe
                 type: Type.OBJECT,
                 properties: {
                   category: { type: Type.STRING },
-                  found: { type: Type.BOOLEAN },
-                  reason: { type: Type.STRING }
+                  found: { type: Type.BOOLEAN }
                 }
               }
             },
@@ -65,11 +61,10 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Inspe
                   items: {
                     type: Type.OBJECT,
                     properties: {
-                      item: { type: Type.STRING, description: "熱量/蛋白質/脂肪/飽和脂肪/反式脂肪/碳水化合物/糖/鈉" },
+                      item: { type: Type.STRING },
                       perServing: { type: Type.STRING },
                       per100g: { type: Type.STRING },
-                      unit: { type: Type.STRING },
-                      found: { type: Type.BOOLEAN }
+                      unit: { type: Type.STRING }
                     }
                   }
                 },
@@ -78,8 +73,7 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Inspe
                   properties: {
                     hasBigEight: { type: Type.BOOLEAN },
                     missingItems: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    unitErrors: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    positionScore: { type: Type.NUMBER }
+                    unitErrors: { type: Type.ARRAY, items: { type: Type.STRING } }
                   }
                 }
               }
@@ -105,21 +99,27 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Inspe
       }
     });
 
-    const result = JSON.parse(response.text);
+    // 確保正確獲取 text 屬性
+    let jsonText = response.text || "{}";
+    jsonText = jsonText.trim();
+    
+    // 處理可能的 JSON 閉合問題
+    if (!jsonText.endsWith('}')) {
+      const lastBrace = jsonText.lastIndexOf('}');
+      if (lastBrace !== -1) {
+        jsonText = jsonText.substring(0, lastBrace + 1);
+      }
+    }
+
+    const result = JSON.parse(jsonText);
     const reasons: string[] = [];
 
-    // 法規判定：營養標示八大要件檢查
+    // 合規性初步校對
     if (!result.nutrition?.compliance?.hasBigEight) {
-      reasons.push(`營養標示不合規：缺少項目 (${result.nutrition?.compliance?.missingItems?.join(', ')})`);
-    }
-    if (result.nutrition?.compliance?.unitErrors?.length > 0) {
-      reasons.push(`單位標示錯誤：${result.nutrition.compliance.unitErrors.join(', ')}`);
+      reasons.push("營養標示八大要件不全");
     }
     if (result.hasPorkOrBeef && !result.meatOrigin) {
       reasons.push("肉品成分缺少原產地標示");
-    }
-    if (!result.manufacturer?.name) {
-      reasons.push("製造商資訊缺漏");
     }
 
     return {
@@ -131,6 +131,9 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Inspe
     };
   } catch (error: any) {
     console.error("Analysis Error:", error);
-    throw new Error("AI 辨識失敗，請確保照片清晰並包含完整的營養標示表格。");
+    if (error.message?.includes('JSON')) {
+      throw new Error("數據解析異常：AI 回傳資料格式錯誤，請重新拍攝。");
+    }
+    throw new Error("辨識異常：請檢查網路連線或影像清晰度。");
   }
 };
